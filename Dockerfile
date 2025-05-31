@@ -19,8 +19,9 @@ RUN CGO_ENABLED=0 go build -o /postlog .
 ##
 FROM scratch
 
-# Note - there's no SSL support in this image
+# Copy over files for timezone and SSL support
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 COPY --from=builder /postlog .
 

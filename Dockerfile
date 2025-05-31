@@ -2,6 +2,7 @@
 # Build stage
 ##
 FROM golang:1.24.3-alpine AS builder
+RUN apk --no-cache add tzdata
 
 WORKDIR /app
 
@@ -18,7 +19,8 @@ RUN CGO_ENABLED=0 go build -o /postlog .
 ##
 FROM scratch
 
-# Note - there's no SSL or timezone support in this image
+# Note - there's no SSL support in this image
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
 COPY --from=builder /postlog .
 

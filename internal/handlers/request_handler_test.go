@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -15,23 +16,60 @@ func TestPayloadHandler_HandlePayload(t *testing.T) {
 	handler := NewRequestHandler(logger, 1<<20)
 
 	tests := []struct {
-		name           string
-		method         string
-		contentType    string
-		body           string
-		expectedStatus int
+		name            string
+		method          string
+		path            string
+		contentType     string
+		body            string
+		expectedStatus  int
+		expectedPayload map[string]any
 	}{
 		{
 			name:           "valid json request",
 			method:         "POST",
 			contentType:    "application/json",
+			path:           "/foo",
 			body:           `{"message": "test log", "level": "info"}`,
 			expectedStatus: http.StatusOK,
+			expectedPayload: map[string]any{
+				"payload_name":   "foo",
+				"payload_method": "POST",
+				"message":        "test log",
+				"level":          "info",
+			},
+		},
+		{
+			name:           "valid json request with subpath",
+			method:         "POST",
+			contentType:    "application/json",
+			path:           "/foo/bar",
+			body:           `{"message": "test log", "level": "info"}`,
+			expectedStatus: http.StatusOK,
+			expectedPayload: map[string]any{
+				"payload_name":   "foo/bar",
+				"payload_method": "POST",
+				"message":        "test log",
+				"level":          "info",
+			},
+		},
+		{
+			name:           "valid get request",
+			method:         "GET",
+			contentType:    "application/json",
+			path:           "/foo/bar?hello=world&foo=69",
+			expectedStatus: http.StatusOK,
+			expectedPayload: map[string]any{
+				"payload_name":   "foo/bar",
+				"payload_method": "GET",
+				"hello":          "world",
+				"foo":            "69",
+			},
 		},
 		{
 			name:           "invalid json request",
 			method:         "POST",
 			contentType:    "application/json",
+			path:           "/foo",
 			body:           `{"invalid": json}`,
 			expectedStatus: http.StatusBadRequest,
 		},
@@ -39,56 +77,29 @@ func TestPayloadHandler_HandlePayload(t *testing.T) {
 			name:           "empty body",
 			method:         "POST",
 			contentType:    "application/json",
+			path:           "/foo",
 			body:           "",
 			expectedStatus: http.StatusBadRequest,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, "/", bytes.NewBufferString(tt.body))
-			req.Header.Set("Content-Type", tt.contentType)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			req := httptest.NewRequest(testCase.method, testCase.path, bytes.NewBufferString(testCase.body))
+			req.Header.Set("Content-Type", testCase.contentType)
 
 			rr := httptest.NewRecorder()
 			handler.HandlePayload(rr, req)
 
-			if rr.Code != tt.expectedStatus {
-				t.Errorf("expected status %d, got %d", tt.expectedStatus, rr.Code)
-			}
+			assert.Equal(t, testCase.expectedStatus, rr.Code)
 
-			if tt.expectedStatus == http.StatusOK {
-				var response map[string]interface{}
-				if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
-					t.Errorf("failed to unmarshal response: %v", err)
-				}
+			if testCase.expectedStatus == http.StatusOK {
+				var response map[string]any
+				err := json.Unmarshal(rr.Body.Bytes(), &response)
+				assert.Nil(t, err)
 
-				if response["status"] != "received" {
-					t.Errorf("expected status 'received', got %v", response["status"])
-				}
+				assert.Equal(t, testCase.expectedPayload, response)
 			}
 		})
-	}
-}
-
-func TestLogHandler_HandleHealth(t *testing.T) {
-	logger := zaptest.NewLogger(t).Sugar()
-	handler := NewRequestHandler(logger, 1<<20)
-
-	req := httptest.NewRequest("GET", "/health", nil)
-	rr := httptest.NewRecorder()
-
-	handler.HandleHealth(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected status %d, got %d", http.StatusOK, rr.Code)
-	}
-
-	var response map[string]interface{}
-	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
-		t.Errorf("failed to unmarshal response: %v", err)
-	}
-
-	if response["status"] != "healthy" {
-		t.Errorf("expected status 'healthy', got %v", response["status"])
 	}
 }

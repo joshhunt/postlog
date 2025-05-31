@@ -40,10 +40,34 @@ jobs:
             exit 1
           fi
 
-  build-and-release:
-    needs: test
+  # Github doesn't support filtering jobs by files changed, so this job + action is used
+  # to gate the build-and-release job so it only runs when go code is changed.
+  check-changes:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main')
+    outputs:
+      code-changed: ${{ steps.changes.outputs.code }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for relevant changes
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            code:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Dockerfile'
+              - '.dockerignore'
+
+  build-and-release:
+    needs: [test, check-changes]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main') && needs.check-changes.outputs.code-changed == 'true'
 
     permissions:
       packages: write

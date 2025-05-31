@@ -1,4 +1,4 @@
-FROM golang:1.24.3-alpine
+FROM golang:1.24.3-alpine AS builder
 
 WORKDIR /app
 
@@ -7,6 +7,10 @@ RUN go mod download && go mod verify
 
 COPY . .
 
-RUN go build -o main main.go
+RUN CGO_ENABLED=0 go build -o /main .
+
+FROM gcr.io/distroless/static-debian12
+
+COPY --from=builder /main .
 
 CMD ["./main"]

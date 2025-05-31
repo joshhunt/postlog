@@ -20,13 +20,17 @@ COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 
 # Copy the rest of the application code and build it
-COPY . .
+COPY main.go ./
+COPY internal ./internal
 RUN CGO_ENABLED=0 go build -o /postlog .
 
 ##
 # Final stage
 ##
 FROM scratch
+
+ENV PORT=80
+EXPOSE 80
 
 # Copy over files for timezone and SSL support
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo

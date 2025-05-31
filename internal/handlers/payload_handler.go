@@ -4,55 +4,95 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"time"
+	"strings"
 )
 
-// HandlePayload processes incoming log requests
-func (h *RequestHandler) HandlePayload(w http.ResponseWriter, r *http.Request) {
+func (h *RequestHandler) handlePost(r *http.Request) (map[string]any, *AppError) {
+	payload := map[string]any{}
 
-	// Read request body
-	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, h.maxBodySize))
-	if err != nil {
-		h.logger.Errorw("failed to read request body", "error", err)
-		h.writeErrorResponse(w, "Failed to read request body", http.StatusBadRequest)
-		return
+	contentType := r.Header.Get("Content-Type")
+	switch contentType {
+	case "application/json":
+		// Read request body
+		bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, h.maxBodySize))
+		if err != nil {
+			appErr := NewAppError("failed to read request body", http.StatusBadRequest, "max_body_size", h.maxBodySize)
+			return nil, appErr
+		}
+
+		// Parse JSON
+		if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+			appErr := NewAppError("invalid json in request body", http.StatusBadRequest, "body_size", len(bodyBytes))
+			return nil, appErr
+		}
+	default:
+		// TODO - handle other content types
+		err := NewAppError("invalid content type", http.StatusUnsupportedMediaType, "content_type", contentType)
+		return nil, err
 	}
-	defer r.Body.Close()
 
-	// Parse JSON
-	var payload map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
-		h.logger.Errorw("invalid json in request body", "error", err)
-		h.writeErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
+	return payload, nil
+}
+
+func (h *RequestHandler) handleGet(r *http.Request) (map[string]any, *AppError) {
+	payload := map[string]any{}
+
+	// Extract query parameters
+	queryParams := r.URL.Query()
+	for key, values := range queryParams {
+		if len(values) == 1 {
+			// Single value - store as string
+			payload[key] = values[0]
+		} else if len(values) > 1 {
+			// Multiple values - store as array
+			payload[key] = values
+		}
+	}
+
+	return payload, nil
+}
+
+// HandlePayload processes incoming log requests
+func (h *RequestHandler) HandlePayload(res http.ResponseWriter, req *http.Request) {
+	var payload map[string]any
+	var appErr *AppError
+
+	switch req.Method {
+	case http.MethodPost:
+		payload, appErr = h.handlePost(req)
+		if appErr != nil {
+			h.HandleAppError(res, appErr)
+			return
+		}
+	case http.MethodGet:
+		payload, appErr = h.handleGet(req)
+		if appErr != nil {
+			h.HandleAppError(res, appErr)
+			return
+		}
+	default:
+		err := NewAppError("Method not allowed", http.StatusMethodNotAllowed, "method", req.Method)
+		h.HandleAppError(res, err)
 		return
 	}
 
 	// Add request metadata
-	payload["req_path"] = r.URL.Path
-	payload["req_method"] = r.Method
-	payload["received_at"] = time.Now().UTC()
+	path := strings.TrimPrefix(strings.TrimSuffix(req.URL.Path, "/"), "/")
+	payload["payload_name"] = path
+	payload["payload_method"] = req.Method
 
 	// Log the request with structured fields
-	h.logRequest(payload)
+	h.logger.Infow("received payload", flattenPayload(payload)...)
 
-	// Create response
-	response := map[string]interface{}{
-		"status":       "received",
-		"received_at":  time.Now().UTC(),
-		"request_path": r.URL.Path,
-		"method":       r.Method,
-		"data":         payload,
-	}
-
-	h.writeJSONResponse(w, response, http.StatusOK)
+	h.writeJSONResponse(res, payload, http.StatusOK)
 }
 
 // logRequest logs the incoming request with flattened fields
-func (h *RequestHandler) logRequest(payload map[string]interface{}) {
-	fields := make([]interface{}, 0, len(payload)*2)
+func flattenPayload(payload map[string]any) []any {
+	fields := make([]any, 0, len(payload)*2)
 	for key, value := range payload {
 		fields = append(fields, key, value)
 	}
 
-	h.logger.Infow("received payload", fields...)
+	return fields
 }

@@ -4,6 +4,15 @@
 FROM golang:1.24.3-alpine AS builder
 RUN apk --no-cache add tzdata
 
+RUN adduser \
+  --disabled-password \
+  --gecos "" \
+  --home "/nonexistent" \
+  --shell "/sbin/nologin" \
+  --no-create-home \
+  --uid 65532 \
+  small-user
+
 WORKDIR /app
 
 # Install dependencies first for caching
@@ -23,6 +32,12 @@ FROM scratch
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
+# Copy over user and group files
+COPY --from=builder /etc/passwd /etc/passwd
+COPY --from=builder /etc/group /etc/group
+USER small-user:small-user
+
+# Copy over the binary from the builder
 COPY --from=builder /postlog .
 
 CMD ["./postlog"]
